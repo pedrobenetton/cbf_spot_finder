@@ -5,26 +5,96 @@
 #include <glob.h>
 #include <mpi.h>
 #include <omp.h>
+#include <math.h>
 #include "cbf.h"
 
 #define HEADER_END_MARK "\x0c\x1a\x04\xd5"
 
-int32_t find_max_pixel(int32_t *pixels, unsigned int num_elements) {
-    if (!pixels || num_elements == 0)
-        return 0;
+typedef struct {
+    int x, y;
+    int32_t intensity;
+} Spot;
 
-    int32_t max_pixel = pixels[0];
-    // OpenMP is used here to split the for loop
-    // iterations across multiple threads
-    // reduction(max:max_pixel) obtains the maximum value
-    // found by any thread and assigns it to max_pixel
-    #pragma omp parallel for reduction(max:max_pixel)
-    for (unsigned int j = 1; j < num_elements; j++) {
-        if (pixels[j] > max_pixel)
-            max_pixel = pixels[j];
+// Helper to check if a pixel is a "strong spot"
+static inline int is_strong_spot(const int32_t *pixels, int width, int height, int x, int y, int32_t threshold) {
+    int idx = y * width + x;
+    int32_t val = pixels[idx];
+    if (val < threshold) return 0;
+
+    // Check 8-neighbor local maximum
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) continue;
+            int nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+            if (pixels[ny * width + nx] > val)
+                return 0;
+        }
+    }
+    return 1;
+}
+
+Spot *find_strong_spots(const int32_t *pixels, int width, int height,
+                        int *out_spot_count, int32_t threshold)
+{
+    int nthreads = omp_get_max_threads();
+    Spot **local_spots = (Spot **)calloc(nthreads, sizeof(Spot *));
+    int *local_counts = (int *)calloc(nthreads, sizeof(int));
+    int *local_caps   = (int *)calloc(nthreads, sizeof(int));
+
+    if (!local_spots || !local_counts || !local_caps) {
+        fprintf(stderr, "Memory allocation failed in find_strong_spots\n");
+        *out_spot_count = 0;
+        return NULL;
     }
 
-    return max_pixel;
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        int cap = 1024; // initial capacity per thread
+        Spot *buf = (Spot *)malloc(cap * sizeof(Spot));
+        int count = 0;
+
+        #pragma omp for schedule(dynamic)
+        for (int y = 1; y < height - 1; y++) {
+            for (int x = 1; x < width - 1; x++) {
+                if (is_strong_spot(pixels, width, height, x, y, threshold)) {
+                    if (count >= cap) {
+                        cap *= 2;
+                        buf = (Spot *)realloc(buf, cap * sizeof(Spot));
+                    }
+                    buf[count++] = (Spot){x, y, pixels[y * width + x]};
+                }
+            }
+        }
+
+        local_spots[tid]  = buf;
+        local_counts[tid] = count;
+        local_caps[tid]   = cap;
+    }
+
+    // Merge results
+    int total = 0;
+    for (int t = 0; t < nthreads; t++)
+        total += local_counts[t];
+
+    Spot *spots = (Spot *)malloc(total * sizeof(Spot));
+    //printf("Spots is %p\n", spots);
+    int offset = 0;
+    for (int t = 0; t < nthreads; t++) {
+        memcpy(spots + offset, local_spots[t], local_counts[t] * sizeof(Spot));
+        //printf("Spots is %d\n", offset);
+        //printf("spots + offset is %p\n", spots + offset);
+        offset += local_counts[t];
+        free(local_spots[t]);
+    }
+
+    free(local_spots);
+    free(local_counts);
+    free(local_caps);
+
+    *out_spot_count = total;
+    return spots;
 }
 
 int32_t* read_cbf_pixels(const char *filename, unsigned int *num_elements) {
@@ -211,8 +281,31 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        int32_t max_pixel = find_max_pixel(pixels, num_elements);
-        printf("  Max pixel value for %s: %d\n", filename, max_pixel);
+        int spot_count = 0;
+        // Create threshold calculation with openmp
+        double sum = 0.0;
+        double sumsq = 0.0;
+        #pragma omp parallel for reduction(+: sum, sumsq)
+        for (int64_t i = 0; i < num_elements; i++) {
+            double v = (double)pixels[i];
+            sum += v;
+            sumsq += v * v;
+        }
+        double mean = sum/num_elements;
+        double var = sumsq/num_elements - mean * mean;
+        double stddev = var > 0 ? sqrt(var) : 0.0;
+        int32_t threshold = (int32_t)round(mean + 5.0 * stddev);
+        int width = 1475;
+        int height = 1679;
+        Spot *spots = find_strong_spots(pixels, width, height, &spot_count, threshold);
+        printf("  Found %d strong spots in %s\n", spot_count, filename);
+        //if (rank == 0) {
+        //    for (int s = 0; s < spot_count; s++) {
+        //        printf("    Spot %4d: (x=%4d, y=%4d)  intensity=%d\n",
+        //            s + 1, spots[s].x, spots[s].y, spots[s].intensity);
+        //    }
+        //}
+        free(spots);
         free(pixels);
     }
 
