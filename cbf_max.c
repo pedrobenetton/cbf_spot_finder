@@ -21,9 +21,9 @@ static inline int is_strong_spot(const int32_t *pixels, int width, int height, i
     int32_t val = pixels[idx];
     if (val < threshold) return 0;
 
-    // Check 8-neighbor local maximum
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
+    // Check 5x5 neighbor local maximum
+    for (int dy = -2; dy <= 2; dy++) {
+        for (int dx = -2; dx <= 2; dx++) {
             if (dx == 0 && dy == 0) continue;
             int nx = x + dx, ny = y + dy;
             if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
