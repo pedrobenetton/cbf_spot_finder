@@ -235,7 +235,10 @@ static char **distribute_filenames(glob_t *glob_result, int rank, int size, size
 }
 
 int main(int argc, char *argv[]) {
+
     MPI_Init(&argc, &argv);
+    MPI_Barrier(MPI_COMM_WORLD);
+    double start = MPI_Wtime();
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -274,6 +277,14 @@ int main(int argc, char *argv[]) {
         free(filenames[i]);
     free(filenames);
 
+    MPI_Barrier(MPI_COMM_WORLD);
+    double end = MPI_Wtime();
     MPI_Finalize();
+    double elapsed = end - start;
+
+    if (rank == 0) {
+        printf("Total execution time: %.6f seconds\n", elapsed);
+    }
+
     return 0;
 }
