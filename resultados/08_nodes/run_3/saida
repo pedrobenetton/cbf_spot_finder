@@ -1,0 +1,36 @@
+Running: np=384, OMP_NUM_THREADS=1, ppn=48
+Total execution time: 0.033418 seconds
+
+
+Running: np=192, OMP_NUM_THREADS=2, ppn=24
+Total execution time: 0.207797 seconds
+
+
+Running: np=96, OMP_NUM_THREADS=4, ppn=12
+Total execution time: 0.072868 seconds
+
+
+Running: np=64, OMP_NUM_THREADS=6, ppn=8
+Total execution time: 0.102004 seconds
+
+
+Running: np=48, OMP_NUM_THREADS=8, ppn=6
+Total execution time: 0.126930 seconds
+
+
+Running: np=32, OMP_NUM_THREADS=12, ppn=4
+Total execution time: 0.152957 seconds
+
+
+Running: np=24, OMP_NUM_THREADS=16, ppn=3
+Total execution time: 0.148256 seconds
+
+
+Running: np=16, OMP_NUM_THREADS=24, ppn=2
+Total execution time: 0.171650 seconds
+
+
+Running: np=8, OMP_NUM_THREADS=48, ppn=1
+Total execution time: 0.284053 seconds
+
+
