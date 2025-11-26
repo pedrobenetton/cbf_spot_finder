@@ -12,7 +12,7 @@ if process_type == "mpi":
 elif process_type == "openmp":
     x_label = "T (number of OpenMP Threads)"
 
-header_regex = re.compile(r"np=(\d+),\s*OMP_NUM_THREADS=(\d+),\s*ppn=(\d+)")
+header_regex = re.compile(r"np=(\d+),\s*OMP_NUM_THREADS=(\d+)")
 time_regex = re.compile(r"Total execution time:\s*([0-9]+\.[0-9]+)")
 
 results = {}
@@ -41,6 +41,7 @@ for ndir in node_dirs:
             header = header_regex.search(block)
             tmatch = time_regex.search(block)
             if header and tmatch:
+                print(header.group(2))
                 if process_type == "mpi":
                     np_value = int(header.group(1))
                 elif process_type == "openmp":
