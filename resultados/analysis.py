@@ -1,10 +1,11 @@
 import os
 import re
+import sys
 import matplotlib.pyplot as plt
 from statistics import mean
 
 base_dir = "."
-process_type = "mpi" # switch between mpi or openmp
+process_type = sys.argv[1] # switch between mpi or openmp
 node_dirs = [f"02_nodes_{process_type}", f"04_nodes_{process_type}"]
 saida_filename = "saida"
 if process_type == "mpi":
@@ -41,7 +42,6 @@ for ndir in node_dirs:
             header = header_regex.search(block)
             tmatch = time_regex.search(block)
             if header and tmatch:
-                print(header.group(2))
                 if process_type == "mpi":
                     np_value = int(header.group(1))
                 elif process_type == "openmp":
