@@ -1,0 +1,27 @@
+#PBS -N meuteste
+#PBS -q paralela
+#PBS -l nodes=2:ppn=128
+#PBS -e erros
+#PBS -o saida
+cd $PBS_O_WORKDIR
+module load mpi
+
+for np in 256 128 64 32 16 8 4 2; do
+
+  case $np in
+    256)  ppn=1 ;;
+    128)  ppn=2 ;;
+    64)  ppn=4 ;;
+    32)  ppn=8 ;;
+    16)  ppn=16 ;;
+    8)   ppn=32 ;;
+    4)   ppn=64 ;;
+    2)   ppn=128 ;;
+  esac
+
+  export OMP_NUM_THREADS=$np
+  echo "Running: np=64, OMP_NUM_THREADS=$np"
+  mpirun -np 1 /home/lovelace/proj/proj1068/p185566/tarefa_final/cbf_spot_finder/cbf_max_mpi '/home/lovelace/proj/proj1068/p185566/tarefa_final/cbf_spot_finder/cbfs/lys_0001_*.cbf'
+  echo ""
+  echo ""
+done

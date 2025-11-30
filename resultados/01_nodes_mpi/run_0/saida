@@ -1,0 +1,32 @@
+Running: np=96, OMP_NUM_THREADS=1
+Total execution time: 5943.548106 seconds
+
+
+Running: np=48, OMP_NUM_THREADS=1
+Total execution time: 2886.370512 seconds
+
+
+Running: np=32, OMP_NUM_THREADS=1
+Total execution time: 762.073808 seconds
+
+
+Running: np=24, OMP_NUM_THREADS=1
+Total execution time: 1257.420057 seconds
+
+
+Running: np=16, OMP_NUM_THREADS=1
+Total execution time: 498.940620 seconds
+
+
+Running: np=8, OMP_NUM_THREADS=1
+Total execution time: 155.051117 seconds
+
+
+Running: np=4, OMP_NUM_THREADS=1
+Total execution time: 5.617977 seconds
+
+
+Running: np=2, OMP_NUM_THREADS=1
+Total execution time: 5.440016 seconds
+
+
