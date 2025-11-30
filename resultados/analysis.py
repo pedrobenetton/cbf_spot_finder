@@ -2,15 +2,17 @@ import os
 import re
 import matplotlib.pyplot as plt
 from statistics import mean
+import sys
 
 base_dir = "."
-process_type = "mpi" # switch between mpi or openmp
-node_dirs = [f"02_nodes_{process_type}", f"04_nodes_{process_type}"]
+process_type = sys.argv[1] # switch between mpi or openmp
+number_of_nodes = sys.argv[2]
+node_dirs = [f"{number_of_nodes}_nodes_{process_type}"]
 saida_filename = "saida"
 if process_type == "mpi":
-    x_label = "np (number of MPI processes)"
+    x_label = "np (Número de processos MPI)"
 elif process_type == "openmp":
-    x_label = "T (number of OpenMP Threads)"
+    x_label = "T (Número de Threads do OpenMP)"
 
 header_regex = re.compile(r"np=(\d+),\s*OMP_NUM_THREADS=(\d+)")
 time_regex = re.compile(r"Total execution time:\s*([0-9]+\.[0-9]+)")
@@ -58,11 +60,15 @@ plt.figure(figsize=(8, 6))
 for nodes in sorted(mean_times.keys()):
     np_values = sorted(mean_times[nodes].keys())
     times = [mean_times[nodes][npv] for npv in np_values]
-    plt.plot(np_values, times, marker="o", label=f"{nodes} nodes")
+    plt.plot(np_values, times, marker="o", label=f"{nodes} nós")
 
 plt.xlabel(x_label)
-plt.ylabel("Mean execution time (s)")
-plt.title("Execution Time vs MPI Processes")
+plt.ylabel("Tempo Médio de Execução (s)")
+
+if process_type == "mpi":
+    plt.title("Tempo de Execução vs Processos MPI")
+elif process_type == "openmp":
+    plt.title("Tempo de Execução vs Threads OpenMP")
 plt.grid(True)
 plt.legend()
 plt.tight_layout()
@@ -80,20 +86,20 @@ for nodes in sorted(mean_times.keys()):
 
     # Speedup
     plt.subplot(1, 2, 1)
-    plt.plot(np_values, speedup, marker="o", label=f"{nodes} nodes")
+    plt.plot(np_values, speedup, marker="o", label=f"{nodes} nós")
     plt.plot(np_values, [npv / base_np for npv in np_values], "k--", label="Ideal")
     plt.xlabel(x_label)
     plt.ylabel("Speedup")
-    plt.title(f"Speedup (Strong Scaling) — {nodes} nodes")
+    plt.title(f"Speedup (Escalabilidade Forte) — {nodes} nós")
     plt.grid(True)
     plt.legend()
 
     # Efficiency
     plt.subplot(1, 2, 2)
-    plt.plot(np_values, efficiency, marker="o", label=f"{nodes} nodes")
+    plt.plot(np_values, efficiency, marker="o", label=f"{nodes} nós")
     plt.xlabel(x_label)
-    plt.ylabel("Efficiency")
-    plt.title(f"Parallel Efficiency — {nodes} nodes")
+    plt.ylabel("Eficiência")
+    plt.title(f"Eficiência Paralela — {nodes} nós")
     plt.grid(True)
     plt.legend()
 
