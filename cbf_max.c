@@ -204,9 +204,10 @@ static void process_file(const char *filename, int rank) {
 
     //printf("  Found %d strong spots in %s\n", spot_count, filename);
     // Uncomment for detailed per-spot output
-    // for (int s = 0; s < spot_count; s++)
-    //     printf("    Spot %4d: (x=%4d, y=%4d)  intensity=%d\n",
-    //         s + 1, spots[s].x, spots[s].y, spots[s].intensity);
+    for (int s = 0; s < spot_count; s++){
+        printf("%s spot %4d: (x=%4d, y=%4d)  intensity=%d\n",
+            filename, s + 1, spots[s].x, spots[s].y, spots[s].intensity);
+    }
 
     free(spots);
     free(pixels);
