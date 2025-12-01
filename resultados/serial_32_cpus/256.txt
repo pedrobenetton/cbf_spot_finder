@@ -1,0 +1,4 @@
+[enedina:421999] *** Process received signal ***
+[enedina:421999] Signal: Segmentation fault (11)
+[enedina:421999] Signal code: Invalid permissions (2)
+[enedina:421999] Failing at address: 0x5630ba9d31d0
