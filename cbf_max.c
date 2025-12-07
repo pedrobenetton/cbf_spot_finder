@@ -15,81 +15,6 @@ typedef struct {
     int32_t intensity;
 } Spot;
 
-static inline int is_strong_spot(const int32_t *pixels, int width, int height, int x, int y, int32_t threshold) {
-    int idx = y * width + x;
-    int32_t val = pixels[idx];
-    if (val < threshold) return 0;
-
-    // Check 5x5 neighbor local maximum
-    for (int dy = -2; dy <= 2; dy++) {
-        for (int dx = -2; dx <= 2; dx++) {
-            if (dx == 0 && dy == 0) continue;
-            int nx = x + dx, ny = y + dy;
-            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-            if (pixels[ny * width + nx] > val)
-                return 0;
-        }
-    }
-    return 1;
-}
-
-Spot *find_strong_spots(const int32_t *pixels, int width, int height, int *out_spot_count, int32_t threshold) {
-    int nthreads = omp_get_max_threads();
-    Spot **local_spots = (Spot **)calloc(nthreads, sizeof(Spot *));
-    int *local_counts = (int *)calloc(nthreads, sizeof(int));
-    int *local_caps   = (int *)calloc(nthreads, sizeof(int));
-
-    if (!local_spots || !local_counts || !local_caps) {
-        fprintf(stderr, "Memory allocation failed in find_strong_spots\n");
-        *out_spot_count = 0;
-        return NULL;
-    }
-
-    #pragma omp parallel
-    {
-        int tid = omp_get_thread_num();
-        int cap = 1024;
-        Spot *buf = (Spot *)malloc(cap * sizeof(Spot));
-        int count = 0;
-
-        #pragma omp for schedule(dynamic)
-        for (int y = 1; y < height - 1; y++) {
-            for (int x = 1; x < width - 1; x++) {
-                if (is_strong_spot(pixels, width, height, x, y, threshold)) {
-                    if (count >= cap) {
-                        cap *= 2;
-                        buf = (Spot *)realloc(buf, cap * sizeof(Spot));
-                    }
-                    buf[count++] = (Spot){x, y, pixels[y * width + x]};
-                }
-            }
-        }
-
-        local_spots[tid]  = buf;
-        local_counts[tid] = count;
-        local_caps[tid]   = cap;
-    }
-
-    int total = 0;
-    for (int t = 0; t < nthreads; t++)
-        total += local_counts[t];
-
-    Spot *spots = (Spot *)malloc(total * sizeof(Spot));
-    int offset = 0;
-    for (int t = 0; t < nthreads; t++) {
-        memcpy(spots + offset, local_spots[t], local_counts[t] * sizeof(Spot));
-        offset += local_counts[t];
-        free(local_spots[t]);
-    }
-
-    free(local_spots);
-    free(local_counts);
-    free(local_caps);
-
-    *out_spot_count = total;
-    return spots;
-}
-
 static unsigned char *find_header_end(unsigned char *data, long filesize) {
     for (long i = 0; i < filesize - 4; i++) {
         if (memcmp(data + i, HEADER_END_MARK, 4) == 0)
@@ -133,8 +58,17 @@ int32_t* read_cbf_pixels(const char *filename, unsigned int *num_elements) {
         return NULL;
     }
 
-    fseek(fp, 0, SEEK_END);
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        perror("fseek");
+        fclose(fp);
+        return NULL;
+    }
     long filesize = ftell(fp);
+    if (filesize < 0) {
+        perror("ftell");
+        fclose(fp);
+        return NULL;
+    }
     fseek(fp, 0, SEEK_SET);
 
     unsigned char *file_content = (unsigned char *)malloc(filesize);
@@ -144,7 +78,7 @@ int32_t* read_cbf_pixels(const char *filename, unsigned int *num_elements) {
         return NULL;
     }
 
-    if (fread(file_content, 1, filesize, fp) != filesize) {
+    if (fread(file_content, 1, filesize, fp) != (size_t)filesize) {
         perror("Failed to read file");
         free(file_content);
         fclose(fp);
@@ -171,10 +105,99 @@ int32_t* read_cbf_pixels(const char *filename, unsigned int *num_elements) {
     return pixels;
 }
 
+static inline int is_strong_spot_3D(int32_t *imgs[5], int width, int height, int x, int y, int32_t threshold) {
+    int center_idx = y * width + x;
+    int32_t val = imgs[2] ? imgs[2][center_idx] : 0;
+    if (!imgs[2]) return 0;
+    if (val < threshold) return 0;
+
+    for (int dz = -2; dz <= 2; dz++) {
+        int zslot = dz + 2;
+        int32_t *plane = imgs[zslot];
+        if (!plane) continue;
+
+        for (int dy = -2; dy <= 2; dy++) {
+            int ny = y + dy;
+            if (ny < 0 || ny >= height) continue;
+            for (int dx = -2; dx <= 2; dx++) {
+                int nx = x + dx;
+                if (nx < 0 || nx >= width) continue;
+                if (dx == 0 && dy == 0 && dz == 0) continue;
+                if (plane[ny * width + nx] > val)
+                    return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+Spot *find_strong_spots_3D(int32_t *imgs[5], int width, int height, int *out_spot_count, int32_t threshold) {
+    int nthreads = omp_get_max_threads();
+    Spot **local_spots = (Spot **)calloc(nthreads, sizeof(Spot *));
+    int *local_counts = (int *)calloc(nthreads, sizeof(int));
+    int *local_caps   = (int *)calloc(nthreads, sizeof(int));
+
+    if (!local_spots || !local_counts || !local_caps) {
+        fprintf(stderr, "Memory allocation failed in find_strong_spots_3D\n");
+        *out_spot_count = 0;
+        return NULL;
+    }
+
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        int cap = 1024;
+        Spot *buf = (Spot *)malloc(cap * sizeof(Spot));
+        int count = 0;
+
+        #pragma omp for schedule(dynamic)
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (is_strong_spot_3D(imgs, width, height, x, y, threshold)) {
+                    if (count >= cap) {
+                        cap *= 2;
+                        Spot *tmp = (Spot *)realloc(buf, cap * sizeof(Spot));
+                        if (!tmp) {
+                            // Very unlikely; abort thread collection gracefully
+                            break;
+                        }
+                        buf = tmp;
+                    }
+                    buf[count++] = (Spot){x, y, imgs[2][y * width + x]};
+                }
+            }
+        }
+
+        local_spots[tid]  = buf;
+        local_counts[tid] = count;
+        local_caps[tid]   = cap;
+    }
+
+    int total = 0;
+    for (int t = 0; t < nthreads; t++)
+        total += local_counts[t];
+
+    Spot *spots = (Spot *)malloc((total > 0 ? total : 1) * sizeof(Spot));
+    int offset = 0;
+    for (int t = 0; t < nthreads; t++) {
+        if (local_counts[t] > 0)
+            memcpy(spots + offset, local_spots[t], local_counts[t] * sizeof(Spot));
+        offset += local_counts[t];
+        free(local_spots[t]);
+    }
+
+    free(local_spots);
+    free(local_counts);
+    free(local_caps);
+
+    *out_spot_count = total;
+    return spots;
+}
+
 static int32_t calculate_threshold(const int32_t *pixels, unsigned int num_elements) {
     double sum = 0.0, sumsq = 0.0;
     #pragma omp parallel for reduction(+: sum, sumsq)
-    for (int64_t i = 0; i < num_elements; i++) {
+    for (int64_t i = 0; i < (int64_t)num_elements; i++) {
         double v = (double)pixels[i];
         sum += v;
         sumsq += v * v;
@@ -186,31 +209,111 @@ static int32_t calculate_threshold(const int32_t *pixels, unsigned int num_eleme
     return (int32_t)round(mean + 5.0 * stddev);
 }
 
-static void process_file(const char *filename, int rank) {
-    unsigned int num_elements = 0;
-    //printf("Rank %d processing %s\n", rank, filename);
+static void process_index_with_neighbors(char **filenames, size_t file_count, size_t target_idx, int rank) {
+    const int K = 2; // we need indices target_idx-2 .. target_idx+2
+    int32_t *imgs[2*K + 1];
+    unsigned int nums[2*K + 1];
 
-    int32_t *pixels = read_cbf_pixels(filename, &num_elements);
-    if (!pixels) {
-        fprintf(stderr, "Rank %d: Skipping %s due to error.\n", rank, filename);
+    for (int i = 0; i < 2*K + 1; i++) {
+        imgs[i] = NULL;
+        nums[i] = 0;
+    }
+
+    static long cache_idx[5] = {-999, -999, -999, -999, -999};
+    static int32_t *cache_img[5] = {NULL, NULL, NULL, NULL, NULL};
+    static unsigned int cache_numel[5] = {0,0,0,0,0};
+
+    for (int dz = -K; dz <= K; dz++) {
+        long neighbor = (long)target_idx + dz;
+        int slot = dz + K;
+
+        if (neighbor < 0 || neighbor >= (long)file_count) {
+            imgs[slot] = NULL;
+            nums[slot] = 0;
+            continue;
+        }
+
+        int found = -1;
+        for (int c = 0; c < 5; c++) {
+            if (cache_idx[c] == neighbor) {
+                found = c;
+                break;
+            }
+        }
+
+        if (found >= 0) {
+            imgs[slot] = cache_img[found];
+            nums[slot] = cache_numel[found];
+            continue;
+        }
+
+        unsigned int numel = 0;
+        int32_t *pixels = read_cbf_pixels(filenames[neighbor], &numel);
+        if (!pixels) {
+            fprintf(stderr, "Rank %d: Failed to read %s (neighbor %ld)\n", rank, filenames[neighbor], neighbor);
+            imgs[slot] = NULL;
+            nums[slot] = 0;
+            continue;
+        }
+
+        int put_slot = -1;
+        for (int c = 0; c < 5; c++) {
+            int keep = 0;
+            for (int dz2 = -K; dz2 <= K; dz2++) {
+                long other = (long)target_idx + dz2;
+                if (cache_idx[c] == other) { keep = 1; break; }
+            }
+            if (!keep) { put_slot = c; break; }
+        }
+        if (put_slot == -1) {
+            put_slot = (int)(neighbor % 5);
+            if (cache_img[put_slot]) {
+                free(cache_img[put_slot]);
+                cache_img[put_slot] = NULL;
+                cache_idx[put_slot] = -999;
+                cache_numel[put_slot] = 0;
+            }
+        } else {
+            if (cache_img[put_slot]) {
+                free(cache_img[put_slot]);
+                cache_img[put_slot] = NULL;
+                cache_idx[put_slot] = -999;
+                cache_numel[put_slot] = 0;
+            }
+        }
+
+        cache_idx[put_slot] = neighbor;
+        cache_img[put_slot] = pixels;
+        cache_numel[put_slot] = numel;
+
+        imgs[slot] = pixels;
+        nums[slot] = numel;
+    }
+
+    if (!imgs[2]) {
+        fprintf(stderr, "Rank %d: central image %zu missing -> skipping\n", rank, target_idx);
         return;
     }
 
-    int32_t threshold = calculate_threshold(pixels, num_elements);
-    int width = 1475, height = 1679;
-
-    int spot_count = 0;
-    Spot *spots = find_strong_spots(pixels, width, height, &spot_count, threshold);
-
-    //printf("  Found %d strong spots in %s\n", spot_count, filename);
-    // Uncomment for detailed per-spot output
-    for (int s = 0; s < spot_count; s++){
-        printf("%s spot %4d: (x=%4d, y=%4d)  intensity=%d\n",
-            filename, s + 1, spots[s].x, spots[s].y, spots[s].intensity);
+    const int width = 1475, height = 1679;
+    const unsigned int expected = (unsigned int)(width * height);
+    if (nums[2] != expected) {
+        fprintf(stderr, "Rank %d: warning: central image %zu reported num_elements=%u but width*height=%u\n",
+                rank, target_idx, nums[2], expected);
     }
 
+    int32_t threshold = calculate_threshold(imgs[2], nums[2]);
+
+    int spot_count = 0;
+    Spot *spots = find_strong_spots_3D(imgs, width, height, &spot_count, threshold);
+
+    printf("Rank %d processed index %s, found %d spots\n", rank, filenames[target_idx], spot_count);
+    for (int s = 0; s < spot_count; s++) {
+        printf("[%4d, %4d, %4d],\n", spots[s].x, spots[s].y, spots[s].intensity);
+    }
+    printf("\n\n");
+
     free(spots);
-    free(pixels);
 }
 
 static char **distribute_filenames(glob_t *glob_result, int rank, int size, size_t *file_count) {
@@ -261,14 +364,15 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "No files matched pattern: %s\n", pattern);
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
-        //printf("Found %zu files matching pattern '%s'\n", glob_result.gl_pathc, pattern);
+        printf("Found %zu files matching pattern '%s'\n", glob_result.gl_pathc, pattern);
     }
 
     size_t file_count;
     char **filenames = distribute_filenames(&glob_result, rank, size, &file_count);
 
-    for (size_t i = rank; i < file_count; i += size)
-        process_file(filenames[i], rank);
+    for (size_t idx = rank; idx < file_count; idx += size) {
+        process_index_with_neighbors(filenames, file_count, idx, rank);
+    }
 
     if (rank == 0) {
         globfree(&glob_result);
@@ -289,3 +393,4 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
+
